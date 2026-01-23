@@ -52,9 +52,9 @@ https://github.com/AlexTuduran/FGFX
 
 https://github.com/papadanku/CShade
 
-https://github.com/EndlesslyFlowering/ReShade_HDR_sh
+https://github.com/EndlesslyFlowering/ReShade_HDR_shaders
 
-adershttps://github.com/martymcmodding/iMMERSE
+https://github.com/martymcmodding/iMMERSE
 
 https://github.com/vortigern11/vort_Shaders
 
