@@ -2,7 +2,7 @@
 
 UniShade offers a safe, non-intrusive alternative to standard ReShade injection. It functions as an overlay compatible with any game that supports the Windows Graphics Capture (WGC) method. I developed this primarily for the Roblox community to restore the ability to use shaders safely. Because UniShade runs entirely as an overlay on top of your game window, it never injects into the game process itself. The software comes with several custom presets I have tweaked to simulate realistic 3D visuals—such as Screen Space Reflections (SSR) and Ambient Occlusion (MXAO)—giving you high-quality visuals without the risk. All credits for the original shader effects belong to their respective creators.
 
-#Credit
+# Credit
 
 creator of reshade: 
 https://github.com/crosire/reshade
