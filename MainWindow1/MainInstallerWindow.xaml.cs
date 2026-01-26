@@ -14,6 +14,9 @@ namespace UniShadeInstaller
     public partial class MainWindow : Window
     {
         // ================= CONFIGURATION =================
+        // OPTIMIZATION: Reuse HttpClient to prevent socket exhaustion and speed up requests
+        private static readonly HttpClient _httpClient = new HttpClient { Timeout = TimeSpan.FromMinutes(5) };
+
         private const string MainZipUrl = "https://github.com/united-debug/unishade/releases/download/shaders/UniShade.zip";
         private const string ModdedCrashHandlerUrl = "https://github.com/united-debug/unishade/releases/download/shaders/RobloxCrashHandler.exe";
         private const string CleanCrashHandlerUrl = "https://github.com/united-debug/unishade/releases/download/shaders/RobloxCrashHandler1.exe";
@@ -132,31 +135,25 @@ namespace UniShadeInstaller
                 Directory.CreateDirectory(destinationShaders);
                 Directory.CreateDirectory(destinationTextures);
 
-                using (HttpClient client = new HttpClient())
+                foreach (string repoUrl in ShaderPackUrls)
                 {
-                    client.Timeout = TimeSpan.FromMinutes(5);
+                    currentPack++;
 
-                    foreach (string repoUrl in ShaderPackUrls)
+                    Dispatcher.Invoke(() => {
+                        StatusText.Text = $"Downloading: {repoUrl}";
+                        double percent = ((double)currentPack / totalPacks) * 100;
+                        InstallProgressBar.Value = percent;
+                        PercentageText.Text = $"{(int)percent}%";
+                    });
+
+                    try
                     {
-                        currentPack++;
-                        //string progressPrefix = $"[{currentPack}/{totalPacks}]"; // Optional numbering
-
-                        Dispatcher.Invoke(() => {
-                            // Shows: Downloading: https://github.com/...
-                            StatusText.Text = $"Downloading: {repoUrl}";
-                            double percent = ((double)currentPack / totalPacks) * 100;
-                            InstallProgressBar.Value = percent;
-                            PercentageText.Text = $"{(int)percent}%";
-                        });
-
-                        try
-                        {
-                            await ProcessShaderPack(client, repoUrl, roaming, destinationShaders, destinationTextures);
-                        }
-                        catch (Exception ex)
-                        {
-                            Debug.WriteLine($"Failed to install pack {repoUrl}: {ex.Message}");
-                        }
+                        // Using shared client
+                        await ProcessShaderPack(_httpClient, repoUrl, roaming, destinationShaders, destinationTextures);
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.WriteLine($"Failed to install pack {repoUrl}: {ex.Message}");
                     }
                 }
 
@@ -303,35 +300,33 @@ namespace UniShadeInstaller
                 Path.Combine(local, "Fishstrap", "Versions")
             };
 
-            using (HttpClient client = new HttpClient())
+            // Using shared client
+            try
             {
-                try
+                byte[] data = await _httpClient.GetByteArrayAsync(url);
+                foreach (var path in basePaths)
                 {
-                    byte[] data = await client.GetByteArrayAsync(url);
-                    foreach (var path in basePaths)
+                    if (Directory.Exists(path))
                     {
-                        if (Directory.Exists(path))
+                        string[] versionFolders = Directory.GetDirectories(path, "version-*");
+                        foreach (var vFolder in versionFolders)
                         {
-                            string[] versionFolders = Directory.GetDirectories(path, "version-*");
-                            foreach (var vFolder in versionFolders)
-                            {
-                                string targetFile = Path.Combine(vFolder, "RobloxCrashHandler.exe");
-                                File.WriteAllBytes(targetFile, data);
-                            }
+                            string targetFile = Path.Combine(vFolder, "RobloxCrashHandler.exe");
+                            File.WriteAllBytes(targetFile, data);
                         }
                     }
                 }
-                catch (Exception ex)
-                {
-                    Debug.WriteLine("Handler error: " + ex.Message);
-                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine("Handler error: " + ex.Message);
             }
         }
 
         private async Task DownloadFileWithProgress(string url, string path)
         {
-            using (HttpClient client = new HttpClient())
-            using (var res = await client.GetAsync(url, HttpCompletionOption.ResponseHeadersRead))
+            // Using shared client
+            using (var res = await _httpClient.GetAsync(url, HttpCompletionOption.ResponseHeadersRead))
             using (var s = await res.Content.ReadAsStreamAsync())
             using (var fs = new FileStream(path, FileMode.Create))
             {
@@ -358,8 +353,6 @@ namespace UniShadeInstaller
             if (ChkRoblox.IsChecked == true) Process.Start(new ProcessStartInfo("https://www.roblox.com/users/7186211615/profile") { UseShellExecute = true });
             if (ChkYoutube.IsChecked == true) Process.Start(new ProcessStartInfo("https://www.youtube.com/@united.mm2") { UseShellExecute = true });
             if (ChkDiscord.IsChecked == true) Process.Start(new ProcessStartInfo("https://discord.gg/48n3khEb") { UseShellExecute = true });
-
-            // New Checkbox Logic
             if (ChkSource.IsChecked == true) Process.Start(new ProcessStartInfo("https://github.com/united-debug/unishade") { UseShellExecute = true });
 
             Application.Current.Shutdown();
