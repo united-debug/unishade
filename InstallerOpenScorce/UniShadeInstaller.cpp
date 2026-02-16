@@ -18,6 +18,7 @@
 #include <iostream>
 #include <algorithm>
 #include <fstream>
+#include <cmath> // For animation math
 
 // Link libraries
 #pragma comment(lib, "d3d11.lib")
@@ -29,7 +30,7 @@
 #pragma comment(lib, "gdiplus.lib")
 #pragma comment(lib, "dwmapi.lib")
 
-// RESOURCE ID
+// RESOURCE ID - MUST MATCH Resource.rc (101 ZIP "UniShade.zip")
 #define IDR_UNISHADE_ZIP 101 
 
 namespace fs = std::filesystem;
@@ -39,14 +40,17 @@ enum class Page { Start, License, Installing, Finish };
 
 Page g_CurrentPage = Page::Start;
 std::string g_StatusText = "Waiting to start...";
-float g_Progress = 0.0f;
+
+// ANIMATION VARIABLES
+float g_TargetProgress = 0.0f;  // Actual status
+float g_CurrentProgress = 0.0f; // Visual animation
 int g_InstallStep = 0;
 
 // Checkboxes
 bool g_ChkRoblox = true;
 bool g_ChkYoutube = true;
 bool g_ChkDiscord = true;
-bool g_ChkSource = true;
+bool g_ChkTiktok = true;
 
 // Textures
 ID3D11ShaderResourceView* g_TexStart = nullptr;
@@ -172,7 +176,7 @@ bool UnzipFile(const std::wstring& zipPath, const std::wstring& destFolder) {
             pFromFolder->Items(&pFi);
             if (pFi) {
                 vOpt.vt = VT_I4;
-                vOpt.lVal = FOF_NO_UI | FOF_NOCONFIRMATION | FOF_SILENT; // Silent unzip
+                vOpt.lVal = FOF_NO_UI | FOF_NOCONFIRMATION | FOF_SILENT;
                 VARIANT vItems;
                 VariantInit(&vItems);
                 vItems.vt = VT_DISPATCH;
@@ -190,7 +194,7 @@ bool UnzipFile(const std::wstring& zipPath, const std::wstring& destFolder) {
     SysFreeString(vFile.bstrVal);
     CoUninitialize();
 
-    // SAFETY PAUSE: Allow Windows Explorer to finish file operations
+    // SAFETY PAUSE
     if (success) std::this_thread::sleep_for(std::chrono::seconds(2));
 
     return success;
@@ -231,7 +235,7 @@ bool EqualsIgnoreCase(const std::wstring& a, const std::wstring& b) {
 
 // ================= WORKER THREADS =================
 void InstallThread() {
-    g_Progress = 0.0f;
+    g_TargetProgress = 0.0f;
     g_InstallStep = 0;
 
     wchar_t appDataPath[MAX_PATH];
@@ -241,21 +245,17 @@ void InstallThread() {
 
     // 1. CLEAN UP
     if (fs::exists(uniShadeRoot)) fs::remove_all(uniShadeRoot);
-    fs::create_directories(uniShadeRoot); // Create clean folder
-    g_Progress = 0.05f;
+    fs::create_directories(uniShadeRoot);
+    g_TargetProgress = 0.05f;
 
     // 2. EXTRACT CORE
     fs::path mainZip = roaming / "temp_unishade.zip";
-    fs::path tempExtract = roaming / "temp_extract_core"; // Extract to temp first
+    fs::path tempExtract = roaming / "temp_extract_core";
 
     if (fs::exists(tempExtract)) fs::remove_all(tempExtract);
 
     if (ExtractZipFromResource(IDR_UNISHADE_ZIP, mainZip.wstring())) {
         UnzipFile(mainZip.wstring(), tempExtract.wstring());
-
-        // === FIX: FLATTEN FOLDER STRUCTURE ===
-        // Look inside tempExtract. If it contains "UniShade - Basic" (or any single folder),
-        // dive into it and copy contents to real UniShade folder.
 
         fs::path sourceDir = tempExtract;
         int subDirCount = 0;
@@ -268,15 +268,12 @@ void InstallThread() {
             }
         }
 
-        // If exactly 1 folder exists inside zip (e.g. "UniShade - Basic"), use THAT as source
         if (subDirCount == 1) {
             sourceDir = singleSubDir;
         }
 
-        // Move contents to actual installation folder
         RecursiveMerge(sourceDir, uniShadeRoot);
 
-        // Clean up temp
         fs::remove_all(tempExtract);
         fs::remove(mainZip);
     }
@@ -284,9 +281,9 @@ void InstallThread() {
         MessageBoxA(NULL, "Failed to extract embedded UniShade.zip!", "Error", MB_OK | MB_ICONERROR);
     }
 
-    g_Progress = 0.20f;
+    g_TargetProgress = 0.20f;
 
-    // 3. PACKS (With folder merge fix)
+    // 3. PACKS
     g_InstallStep = 1;
     fs::path destShaders = uniShadeRoot / "reshade-shaders" / "Shaders";
     fs::path destTextures = uniShadeRoot / "reshade-shaders" / "Textures";
@@ -295,7 +292,7 @@ void InstallThread() {
 
     int total = (int)ShaderPackUrls.size();
     for (int i = 0; i < total; i++) {
-        g_Progress = 0.20f + ((float)i / total) * 0.70f;
+        g_TargetProgress = 0.20f + ((float)i / total) * 0.70f;
         std::wstring url = GetZipUrl(ShaderPackUrls[i]);
         fs::path tempZip = roaming / L"temp_pack.zip";
         fs::path tempExtractPack = roaming / L"temp_extract_pack";
@@ -364,21 +361,21 @@ void InstallThread() {
     }
     fs::remove(handlerTemp);
 
-    g_Progress = 1.0f;
+    g_TargetProgress = 1.0f;
     std::this_thread::sleep_for(std::chrono::seconds(1));
     g_CurrentPage = Page::Finish;
 }
 
 void UninstallThread() {
     g_StatusText = "Uninstalling...";
-    g_Progress = 0.0f;
+    g_TargetProgress = 0.0f;
 
     wchar_t appDataPath[MAX_PATH];
     SHGetFolderPathW(NULL, CSIDL_APPDATA, NULL, 0, appDataPath);
     fs::path root = fs::path(appDataPath) / "UniShade";
 
     if (fs::exists(root)) fs::remove_all(root);
-    g_Progress = 0.5f;
+    g_TargetProgress = 0.5f;
 
     wchar_t localAppData[MAX_PATH];
     SHGetFolderPathW(NULL, CSIDL_LOCAL_APPDATA, NULL, 0, localAppData);
@@ -400,7 +397,7 @@ void UninstallThread() {
     }
     fs::remove(handlerTemp);
 
-    g_Progress = 1.0f;
+    g_TargetProgress = 1.0f;
     MessageBoxA(NULL, "Uninstalled Successfully!", "UniShade", MB_OK);
     exit(0);
 }
@@ -598,6 +595,17 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
         ImGui_ImplWin32_NewFrame();
         ImGui::NewFrame();
 
+        // === SMOOTH ANIMATION ===
+        float speed = 2.0f;
+        float dt = io.DeltaTime;
+        if (g_CurrentProgress < g_TargetProgress) {
+            g_CurrentProgress += (g_TargetProgress - g_CurrentProgress) * speed * dt;
+            if (std::abs(g_TargetProgress - g_CurrentProgress) < 0.001f) g_CurrentProgress = g_TargetProgress;
+        }
+        else if (g_CurrentProgress > g_TargetProgress) {
+            g_CurrentProgress = g_TargetProgress;
+        }
+
         ImGui::SetNextWindowPos(ImVec2(0, 0));
         ImGui::SetNextWindowSize(io.DisplaySize);
         ImGui::Begin("Main", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
@@ -686,11 +694,11 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
                 float wrapWidth = ImGui::GetCursorPos().x + ImGui::GetContentRegionAvail().x - 10.0f;
                 ImGui::PushTextWrapPos(wrapWidth);
 
-                ImGui::TextWrapped("By proceeding, you agree to the following terms:");
+                ImGui::TextWrapped("You are not permitted to redistribute, repackage, or sell any files contained within this installer without explicit permission. The distribution of UniShade Pro effects is strictly prohibited.");
                 ImGui::Spacing();
-                ImGui::TextWrapped("You are not permitted to redistribute, repackage, or sell any files contained within this installer without explicit permission.");
+                ImGui::TextWrapped("The creator retains full exclusive rights and ownership over the UniShade source code and its configuration logic.");
                 ImGui::Spacing();
-                ImGui::TextWrapped("All ReShade effects and shaders downloaded by this software are the intellectual property of their respective owners and are sourced directly from their public GitHub repositories. This installer acts solely as a configuration tool.");
+                ImGui::TextWrapped("All standard ReShade effects and shaders downloaded by this software are the intellectual property of their respective owners and are sourced directly from their public GitHub repositories. This installer acts solely as a configuration tool.");
 
                 ImGui::PopTextWrapPos(); // === END FIX ===
                 ImGui::PopStyleColor();
@@ -728,7 +736,7 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
 
                 // Percentage
                 ImGui::SameLine();
-                char pct[32]; sprintf_s(pct, "%d%%", (int)(g_Progress * 100));
+                char pct[32]; sprintf_s(pct, "%d%%", (int)(g_CurrentProgress * 100));
                 float pctWidth = ImGui::CalcTextSize(pct).x;
                 ImGui::SetCursorPosX(ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x - pctWidth - 25.0f);
                 ImGui::Text("%s", pct);
@@ -736,7 +744,7 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
                 ImGui::Spacing(); ImGui::Spacing();
 
                 float availWidth = ImGui::GetContentRegionAvail().x - 25.0f;
-                ImGui::ProgressBar(g_Progress, ImVec2(availWidth, 6), "");
+                ImGui::ProgressBar(g_CurrentProgress, ImVec2(availWidth, 6), "");
 
                 ImGui::Spacing(); ImGui::Spacing();
 
@@ -774,9 +782,9 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
                 ImGui::Spacing();
                 ImGui::Checkbox(" Subscribe on YouTube", &g_ChkYoutube);
                 ImGui::Spacing();
-                ImGui::Checkbox(" Join Discord", &g_ChkDiscord);
+                ImGui::Checkbox(" Join the discord server", &g_ChkDiscord);
                 ImGui::Spacing();
-                ImGui::Checkbox(" View Source Code", &g_ChkSource);
+                ImGui::Checkbox(" Follow me on tiktok", &g_ChkTiktok);
 
                 float bottomY = ImGui::GetWindowHeight() - 65.0f;
                 ImGui::SetCursorPosY(bottomY);
@@ -797,8 +805,8 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
                 if (ImGui::Button("FINISH >", ImVec2(btnWidth, 40))) {
                     if (g_ChkRoblox) ShellExecuteA(0, 0, "https://www.roblox.com/users/7186211615/profile", 0, 0, SW_SHOW);
                     if (g_ChkYoutube) ShellExecuteA(0, 0, "https://www.youtube.com/@united.mm2", 0, 0, SW_SHOW);
-                    if (g_ChkDiscord) ShellExecuteA(0, 0, "https://discord.gg/48n3khEb", 0, 0, SW_SHOW);
-                    if (g_ChkSource) ShellExecuteA(0, 0, "https://github.com/united-debug/unishade", 0, 0, SW_SHOW);
+                    if (g_ChkDiscord) ShellExecuteA(0, 0, "https://discord.gg/N36mr3tFW7", 0, 0, SW_SHOW);
+                    if (g_ChkTiktok) ShellExecuteA(0, 0, "https://www.tiktok.com/@united.mm2", 0, 0, SW_SHOW);
                     done = true;
                 }
             }
